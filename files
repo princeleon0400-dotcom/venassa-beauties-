@@ -1,0 +1,186 @@
+Create a professional, premium beauty products e-commerce website called VB BEAUTY SHOP.
+
+Design:
+
+- Luxury cream, champagne gold and dark brown theme.
+- Elegant typography and modern responsive layout.
+- Beautiful product photos and attractive product cards.
+- Mobile-first design.
+
+Features:
+
+1. Homepage with a beautiful hero banner.
+2. Product catalogue with skincare, perfumes, makeup and beauty accessories.
+3. Product details, prices and descriptions.
+4. Shopping cart with quantity controls and automatic totals.
+5. Wishlist.
+6. Customer profile.
+7. Admin dashboard with secure admin access.
+8. Admin can add, edit and delete products.
+9. Admin can upload product photos.
+10. Search and category filters.
+11. Order management.
+12. WhatsApp contact and ordering option.
+
+Use the product images I upload as sample products.
+
+Make the website fully functional, not just a visual mockup. Use persistent storage for products and orders, with appropriate access controls for admin functions.
+
+Make it responsive on Android phones, tablets and computers.6azx lwn7 7frl gwox a6vt rwh5 4mmj qzqgVANESSA BEAUTIESCreate vanessa beauty with pictures and the get a command that I can paste it to supabase becoz am using a phone and photos ,price tag and how to add more and change the prices
+-- VANESSA BEAUTIES DATABASE SETUP
+
+create extension if not exists pgcrypto;
+
+-- PRODUCTS TABLE
+create table if not exists public.products (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  description text default '',
+  price numeric(12,2) not null default 0,
+  stock integer not null default 0,
+  category text not null default 'Other',
+  image_url text,
+  is_placeholder_price boolean not null default false,
+  active boolean not null default true,
+  created_at timestamptz default now()
+);
+
+alter table public.products
+add column if not exists is_placeholder_price boolean not null default false;
+
+-- ORDERS TABLE
+create table if not exists public.orders (
+  id uuid primary key default gen_random_uuid(),
+  customer_name text not null,
+  phone text not null,
+  delivery_location text not null,
+  items jsonb not null default '[]'::jsonb,
+  total numeric(12,2) not null default 0,
+  status text default 'new',
+  payment_status text default 'pending',
+  created_at timestamptz default now()
+);
+
+-- ADMIN TABLE
+create table if not exists public.shop_admins (
+  user_id uuid primary key references auth.users(id) on delete cascade
+);
+
+-- ADMIN CHECK FUNCTION
+create or replace function public.is_shop_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.shop_admins
+    where user_id = auth.uid()
+  );
+$$;
+
+-- ENABLE SECURITY
+alter table public.products enable row level security;
+alter table public.orders enable row level security;
+alter table public.shop_admins enable row level security;
+
+-- PRODUCT POLICIES
+drop policy if exists "Anyone can view active products" on public.products;
+create policy "Anyone can view active products"
+on public.products for select
+to anon, authenticated
+using (active = true or public.is_shop_admin());
+
+drop policy if exists "Admins manage products" on public.products;
+create policy "Admins manage products"
+on public.products for all
+to authenticated
+using (public.is_shop_admin())
+with check (public.is_shop_admin());
+
+-- ORDER POLICIES
+drop policy if exists "Customers can submit orders" on public.orders;
+create policy "Customers can submit orders"
+on public.orders for insert
+to anon, authenticated
+with check (
+  length(trim(customer_name)) > 0
+  and length(trim(phone)) >= 7
+  and length(trim(delivery_location)) > 0
+  and jsonb_typeof(items) = 'array'
+);
+
+drop policy if exists "Admins view and manage orders" on public.orders;
+create policy "Admins view and manage orders"
+on public.orders for all
+to authenticated
+using (public.is_shop_admin())
+with check (public.is_shop_admin());
+
+-- ADMIN LIST POLICY
+drop policy if exists "Admins can read admin list" on public.shop_admins;
+create policy "Admins can read admin list"
+on public.shop_admins for select
+to authenticated
+using (public.is_shop_admin());
+
+-- PRODUCT PHOTO STORAGE
+insert into storage.buckets (id, name, public)
+values ('product-images', 'product-images', true)
+on conflict (id) do update set public = true;
+
+drop policy if exists "Public can view product images" on storage.objects;
+create policy "Public can view product images"
+on storage.objects for select
+to public
+using (bucket_id = 'product-images');
+
+drop policy if exists "Admins upload product images" on storage.objects;
+create policy "Admins upload product images"
+on storage.objects for insert
+to authenticated
+with check (
+  bucket_id = 'product-images'
+  and public.is_shop_admin()
+);
+
+drop policy if exists "Admins update product images" on storage.objects;
+create policy "Admins update product images"
+on storage.objects for update
+to authenticated
+using (
+  bucket_id = 'product-images'
+  and public.is_shop_admin()
+)
+with check (
+  bucket_id = 'product-images'
+  and public.is_shop_admin()
+);
+
+drop policy if exists "Admins delete product images" on storage.objects;
+create policy "Admins delete product images"
+on storage.objects for delete
+to authenticated
+using (
+  bucket_id = 'product-images'
+  and public.is_shop_admin()
+);
+
+-- SAMPLE PRODUCTS WITH TEMPORARY PRICES
+insert into public.products
+(name, description, price, stock, category, image_url, is_placeholder_price, active)
+select v.name, v.description, v.price, v.stock, v.category, v.image_url, true, true
+from (values
+('Everyday Makeup Set', 'Sample makeup products', 1200, 8, 'Makeup',
+'https://images.unsplash.com/photo-1596462502278-27bfdc403348?auto=format&fit=crop&w=700&q=80'),
+('Skincare Essentials', 'Sample skincare products', 950, 6, 'Skincare',
+'https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?auto=format&fit=crop&w=700&q=80'),
+('Body Care Collection', 'Sample body care products', 750, 5, 'Body care',
+'https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?auto=format&fit=crop&w=700&q=80'),
+('Perfume Selection', 'Sample fragrance products', 1500, 4, 'Perfumes',
+'https://images.unsplash.com/photo-1594035910387-fea47794261f?auto=format&fit=crop&w=700&q=80')
+) as v(name, description, price, stock, category, image_url)
+where not exists (
+  select 1 from public.products p where p.name = v.name
+);
